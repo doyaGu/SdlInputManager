@@ -1,7 +1,3 @@
-#ifdef WIN32
-#include <Windows.h>
-#endif
-
 #include "CKAll.h"
 
 #define CKOGUID_GETMOUSEPOSITION CKGUID(0x6ea0201, 0x680e3a62)
@@ -53,36 +49,6 @@ void CK2dVectorGetMousePos(CKContext *context, CKParameterOut *res, CKParameterI
             CKRenderContext *rc = context->GetPlayerRenderContext();
             if (rc)
             {
-#ifdef WIN32
-                HWND hWnd = (HWND)rc->GetWindowHandle();
-                POINT pt;
-                pt.x = (LONG)pos.x;
-                pt.y = (LONG)pos.y;
-                ::ScreenToClient(hWnd, &pt);
-                if (pt.x >= 0)
-                {
-                    int width = rc->GetWidth();
-                    if (pt.x >= width)
-                        pt.x = width - 1;
-                }
-                else
-                {
-                    pt.x = 0;
-                }
-                if (pt.y >= 0)
-                {
-                    int height = rc->GetHeight();
-                    if (pt.y >= height)
-                        pt.y = height - 1;
-                }
-                else
-                {
-                    pt.y = 0;
-                }
-                pos.x = (float)pt.x;
-                pos.y = (float)pt.y;
-#else
-                // For non-Windows platforms, use render context position
                 VxRect rect;
                 rc->GetWindowRect(rect, TRUE);
                 pos.x = pos.x - rect.left;
@@ -93,7 +59,6 @@ void CK2dVectorGetMousePos(CKContext *context, CKParameterOut *res, CKParameterI
                 int height = rc->GetHeight();
                 if (pos.x >= width) pos.x = (float)(width - 1);
                 if (pos.y >= height) pos.y = (float)(height - 1);
-#endif
             }
         }
         *(Vx2DVector *)res->GetWriteDataPtr() = pos;
