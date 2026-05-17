@@ -27,7 +27,7 @@ int CKKeyStringFunc(CKParameter *param, char *ValueString, CKBOOL ReadFromString
     }
     else
     {
-        CKDWORD key = NULL;
+        CKDWORD key = 0;
         param->GetValue(&key, FALSE);
         int len = im->GetKeyName(key, ValueString);
         if (len > 1) return len;
