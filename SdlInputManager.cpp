@@ -662,7 +662,7 @@ void SdlInputManager::SetKeyDown(CKDWORD iKey)
     if (iKey < KEYBOARD_BUFFER_SIZE)
     {
         m_KeyboardState[iKey] |= KS_PRESSED;
-        m_KeyboardStamps[iKey] = SDL_GetTicks();
+        m_KeyboardStamps[iKey] = (int)SDL_GetTicks();
     }
 }
 
@@ -671,7 +671,7 @@ void SdlInputManager::SetKeyUp(CKDWORD iKey)
     if (iKey < KEYBOARD_BUFFER_SIZE)
     {
         m_KeyboardState[iKey] |= KS_RELEASED;
-        m_KeyboardStamps[iKey] = SDL_GetTicks();
+        m_KeyboardStamps[iKey] = (int)SDL_GetTicks();
     }
 }
 
@@ -680,7 +680,7 @@ void SdlInputManager::SetMultipleKeys(const CKDWORD *keys, int count, CKBOOL pre
     if (!keys)
         return;
 
-    CKDWORD ticks = SDL_GetTicks();
+    CKDWORD ticks = (CKDWORD)SDL_GetTicks();
     for (int i = 0; i < count; i++)
     {
         CKDWORD key = keys[i];
@@ -937,6 +937,9 @@ CKERROR SdlInputManager::PreProcess()
     SDL_Event event;
     m_NumberOfKeyInBuffer = 0;
 
+    // Snapshot previous button state before applying this frame's mouse events.
+    m_Mouse.Poll(m_Paused);
+
     const Uint32 eventRanges[][2] = {
         { SDL_EVENT_KEY_DOWN, SDL_EVENT_SCREEN_KEYBOARD_HIDDEN },
         { SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_REMOVED },
@@ -958,6 +961,7 @@ CKERROR SdlInputManager::PreProcess()
                     if (vkey > 0 && vkey < KEYBOARD_BUFFER_SIZE)
                     {
                         CKBOOL pressed = (event.type == SDL_EVENT_KEY_DOWN);
+                        CKDWORD timestamp = (CKDWORD)SDL_NS_TO_MS(event.key.timestamp);
                         
                         if (pressed)
                         {
@@ -965,13 +969,13 @@ CKERROR SdlInputManager::PreProcess()
                             if (!event.key.repeat || m_EnableKeyboardRepetition)
                             {
                                 m_KeyboardState[vkey] |= KS_PRESSED;
-                                m_KeyboardStamps[vkey] = event.key.timestamp;
+                                m_KeyboardStamps[vkey] = timestamp;
                                 
                                 if (m_NumberOfKeyInBuffer < KEYBOARD_BUFFER_SIZE)
                                 {
                                     m_KeyInBuffer[m_NumberOfKeyInBuffer].dwOfs = vkey;
                                     m_KeyInBuffer[m_NumberOfKeyInBuffer].dwData = 0x80;
-                                    m_KeyInBuffer[m_NumberOfKeyInBuffer].dwTimeStamp = (CKDWORD)event.key.timestamp;
+                                    m_KeyInBuffer[m_NumberOfKeyInBuffer].dwTimeStamp = timestamp;
                                     ++m_NumberOfKeyInBuffer;
                                 }
                             }
@@ -979,13 +983,13 @@ CKERROR SdlInputManager::PreProcess()
                         else
                         {
                             m_KeyboardState[vkey] |= KS_RELEASED;
-                            m_KeyboardStamps[vkey] = (CKDWORD)(event.key.timestamp - m_KeyboardStamps[vkey]);
+                            m_KeyboardStamps[vkey] = (CKDWORD)(timestamp - m_KeyboardStamps[vkey]);
                             
                             if (m_NumberOfKeyInBuffer < KEYBOARD_BUFFER_SIZE)
                             {
                                 m_KeyInBuffer[m_NumberOfKeyInBuffer].dwOfs = vkey;
                                 m_KeyInBuffer[m_NumberOfKeyInBuffer].dwData = 0x00;
-                                m_KeyInBuffer[m_NumberOfKeyInBuffer].dwTimeStamp = (CKDWORD)event.key.timestamp;
+                                m_KeyInBuffer[m_NumberOfKeyInBuffer].dwTimeStamp = timestamp;
                                 ++m_NumberOfKeyInBuffer;
                             }
                         }
@@ -1037,11 +1041,24 @@ CKERROR SdlInputManager::PreProcess()
                     // Try to open the gamepad if we have room
                     if (m_GamepadCount < m_MaxGamepads)
                     {
-                        SDL_Gamepad *gamepad = SDL_OpenGamepad(event.gdevice.which);
-                        if (gamepad)
+                        CKBOOL alreadyOpen = FALSE;
+                        for (int i = 0; i < m_GamepadCount; i++)
                         {
-                            m_Gamepads[m_GamepadCount].Init(gamepad, event.gdevice.which);
-                            m_GamepadCount++;
+                            if (m_Gamepads[i].m_InstanceID == event.gdevice.which)
+                            {
+                                alreadyOpen = TRUE;
+                                break;
+                            }
+                        }
+
+                        if (!alreadyOpen)
+                        {
+                            SDL_Gamepad *gamepad = SDL_OpenGamepad(event.gdevice.which);
+                            if (gamepad)
+                            {
+                                m_Gamepads[m_GamepadCount].Init(gamepad, event.gdevice.which);
+                                m_GamepadCount++;
+                            }
                         }
                     }
                     break;
@@ -1077,7 +1094,7 @@ CKERROR SdlInputManager::PreProcess()
     // Keyboard repetition (emulate DX8 behavior)
     if (!m_Paused && m_EnableKeyboardRepetition)
     {
-        CKDWORD currentTicks = SDL_GetTicks();
+        CKDWORD currentTicks = (CKDWORD)SDL_GetTicks();
         for (int i = 0; i < KEYBOARD_BUFFER_SIZE; i++)
         {
             if (m_KeyboardState[i] == KS_PRESSED)
@@ -1119,8 +1136,6 @@ CKERROR SdlInputManager::PreProcess()
         m_WasPaused = FALSE;
     }
 
-    m_Mouse.Poll(m_Paused);
-    
     // Update relative mouse motion
     m_Mouse.m_State.lX = (long)m_RelMouseX;
     m_Mouse.m_State.lY = (long)m_RelMouseY;
@@ -1151,8 +1166,13 @@ CKERROR SdlInputManager::PostProcess()
 
 SdlInputManager::~SdlInputManager()
 {
+    Uninitialize();
+
     if (m_Gamepads)
+    {
         delete[] m_Gamepads;
+        m_Gamepads = NULL;
+    }
 }
 
 SdlInputManager::SdlInputManager(CKContext *context) : CKInputManager(context, "SDL Input Manager")
