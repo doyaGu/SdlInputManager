@@ -123,6 +123,7 @@ public:
         Vx2DVector m_Sliders;
         CKDWORD m_PointOfViewAngle;
         CKDWORD m_Buttons;
+        CKDWORD m_ButtonsHigh;
         // Axis ranges (SDL gamepads use -32768 to 32767)
         CKDWORD m_Xmin, m_Xmax;
         CKDWORD m_Ymin, m_Ymax;

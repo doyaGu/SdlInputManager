@@ -2,6 +2,33 @@
 
 #include <cmath>
 
+static void SetButtonState(CKDWORD *buttonsLow, CKDWORD *buttonsHigh, int button, CKBOOL down)
+{
+    CKDWORD mask;
+
+    if (!buttonsLow || !buttonsHigh)
+        return;
+
+    if (button < 0 || button >= 64)
+        return;
+
+    mask = 1u << (button & 31);
+    if (button < 32)
+    {
+        if (down)
+            *buttonsLow |= mask;
+        else
+            *buttonsLow &= ~mask;
+    }
+    else
+    {
+        if (down)
+            *buttonsHigh |= mask;
+        else
+            *buttonsHigh &= ~mask;
+    }
+}
+
 // Helper function to normalize axis value from SDL range to [-1, 1]
 static double NormalizeAxis(Sint16 value, CKDWORD minValue, CKDWORD maxValue)
 {
@@ -46,6 +73,7 @@ SdlInputManager::CKGamepad::CKGamepad()
     m_Sliders.Set(0.0f, 0.0f);
     m_PointOfViewAngle = (CKDWORD)-1;
     m_Buttons = 0;
+    m_ButtonsHigh = 0;
 
     // Default SDL gamepad axis range
     m_Xmin = m_Ymin = m_Zmin = -32768;
@@ -80,11 +108,11 @@ void SdlInputManager::CKGamepad::Init(SDL_Gamepad *gamepad, SDL_JoystickID id)
         strcpy(m_DeviceName, "Game Controller");
     }
 
-    // SDL gamepads have a standard button layout (up to 21 buttons)
-    // We expose up to 32 buttons for compatibility
+    // SDL gamepads have a standard button layout. The legacy aggregate button
+    // state remains 32-bit, but per-button queries can see a second 32-bit bank.
     m_ButtonCount = SDL_GAMEPAD_BUTTON_COUNT;
-    if (m_ButtonCount > 32)
-        m_ButtonCount = 32;
+    if (m_ButtonCount > 64)
+        m_ButtonCount = 64;
 
     // SDL gamepads always have these axes in the standard mapping:
     // Left stick X/Y, Right stick X/Y, Triggers as axes
@@ -117,6 +145,7 @@ void SdlInputManager::CKGamepad::ResetState()
     m_Sliders.Set(0.0f, 0.0f);
     m_PointOfViewAngle = (CKDWORD)-1;
     m_Buttons = 0;
+    m_ButtonsHigh = 0;
     m_Polled = TRUE;
 }
 
@@ -231,6 +260,7 @@ void SdlInputManager::CKGamepad::Poll()
 
     // Get button states (mapping SDL gamepad buttons to a 32-bit mask)
     m_Buttons = 0;
+    m_ButtonsHigh = 0;
     
     // Map SDL gamepad buttons to DirectInput-style button indices
     // SDL gamepad button order: A, B, X, Y, Back, Guide, Start, LeftStick, RightStick, LeftShoulder, RightShoulder, DPad...
@@ -258,7 +288,7 @@ void SdlInputManager::CKGamepad::Poll()
     for (int i = 0; i < numMappedButtons && i < 32; i++)
     {
         if (SDL_GetGamepadButton(m_Gamepad, buttonMap[i]))
-            m_Buttons |= (1 << i);
+            SetButtonState(&m_Buttons, &m_ButtonsHigh, i, TRUE);
     }
 
     m_Polled = TRUE;

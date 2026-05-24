@@ -1,5 +1,60 @@
 #include "SdlInputManager.h"
 
+#define SDLINPUT_DEFAULT_MAX_JOYSTICKS 16
+#define SDLINPUT_HARD_MAX_JOYSTICKS 256
+
+static int SdlInputNormalizeMaxJoystickCount(int maxJoysticks)
+{
+    if (maxJoysticks < 1)
+        return 1;
+
+    if (maxJoysticks > SDLINPUT_HARD_MAX_JOYSTICKS)
+        return SDLINPUT_HARD_MAX_JOYSTICKS;
+
+    return maxJoysticks;
+}
+
+static void SdlInputSetButtonState(CKDWORD *buttonsLow, CKDWORD *buttonsHigh, int button, CKBOOL down)
+{
+    CKDWORD mask;
+
+    if (!buttonsLow || !buttonsHigh)
+        return;
+
+    if (button < 0 || button >= 64)
+        return;
+
+    mask = 1u << (button & 31);
+    if (button < 32)
+    {
+        if (down)
+            *buttonsLow |= mask;
+        else
+            *buttonsLow &= ~mask;
+    }
+    else
+    {
+        if (down)
+            *buttonsHigh |= mask;
+        else
+            *buttonsHigh &= ~mask;
+    }
+}
+
+static CKBOOL SdlInputGetButtonState(CKDWORD buttonsLow, CKDWORD buttonsHigh, int button)
+{
+    CKDWORD mask;
+
+    if (button < 0 || button >= 64)
+        return FALSE;
+
+    mask = 1u << (button & 31);
+    if (button < 32)
+        return ((buttonsLow & mask) != 0) ? TRUE : FALSE;
+
+    return ((buttonsHigh & mask) != 0) ? TRUE : FALSE;
+}
+
 #include "CKAll.h"
 
 #ifdef WIN32
@@ -373,7 +428,7 @@ CKBOOL SdlInputManager::IsJoystickButtonDown(int iJoystick, int iButton)
 
     CKGamepad *gamepad = &m_Gamepads[iJoystick];
     gamepad->Poll();
-    return (gamepad->m_Buttons & (1 << iButton)) != 0;
+    return SdlInputGetButtonState(gamepad->m_Buttons, gamepad->m_ButtonsHigh, iButton);
 }
 
 void SdlInputManager::Pause(CKBOOL pause)
@@ -412,12 +467,7 @@ void SdlInputManager::SetMaxJoysticks(int maxJoysticks)
     if (m_Gamepads != NULL)
         return;
 
-    if (maxJoysticks < 1)
-        maxJoysticks = 1;
-    if (maxJoysticks > 16)
-        maxJoysticks = 16;
-
-    m_MaxGamepads = maxJoysticks;
+    m_MaxGamepads = SdlInputNormalizeMaxJoystickCount(maxJoysticks);
 }
 
 const char *SdlInputManager::GetJoystickName(int iJoystick)
@@ -742,18 +792,18 @@ void SdlInputManager::SetMouseWheelPosition(int position)
 
 void SdlInputManager::SetJoystickButtonDown(int iJoystick, int iButton)
 {
-    if (iJoystick >= 0 && iJoystick < m_GamepadCount && iButton >= 0 && iButton < 32)
+    if (iJoystick >= 0 && iJoystick < m_GamepadCount && iButton >= 0 && iButton < 64)
     {
-        m_Gamepads[iJoystick].m_Buttons |= (1 << iButton);
+        SdlInputSetButtonState(&m_Gamepads[iJoystick].m_Buttons, &m_Gamepads[iJoystick].m_ButtonsHigh, iButton, TRUE);
         m_Gamepads[iJoystick].m_Polled = TRUE;
     }
 }
 
 void SdlInputManager::SetJoystickButtonUp(int iJoystick, int iButton)
 {
-    if (iJoystick >= 0 && iJoystick < m_GamepadCount && iButton >= 0 && iButton < 32)
+    if (iJoystick >= 0 && iJoystick < m_GamepadCount && iButton >= 0 && iButton < 64)
     {
-        m_Gamepads[iJoystick].m_Buttons &= ~(1 << iButton);
+        SdlInputSetButtonState(&m_Gamepads[iJoystick].m_Buttons, &m_Gamepads[iJoystick].m_ButtonsHigh, iButton, FALSE);
         m_Gamepads[iJoystick].m_Polled = TRUE;
     }
 }
@@ -830,6 +880,7 @@ void SdlInputManager::SetJoystickState(int iJoystick, const VxVector &pos, const
         m_Gamepads[iJoystick].m_Rotation = rot;
         m_Gamepads[iJoystick].m_Sliders = sliders;
         m_Gamepads[iJoystick].m_Buttons = buttons;
+        m_Gamepads[iJoystick].m_ButtonsHigh = 0;
         m_Gamepads[iJoystick].m_PointOfViewAngle = (pov == 0xFFFFFFFF) ? (CKDWORD)-1 : pov;
         m_Gamepads[iJoystick].m_Polled = TRUE;
     }
@@ -852,6 +903,7 @@ void SdlInputManager::ClearJoystickState(int joystickIndex)
     if (joystickIndex >= 0 && joystickIndex < m_GamepadCount)
     {
         m_Gamepads[joystickIndex].m_Buttons = 0;
+        m_Gamepads[joystickIndex].m_ButtonsHigh = 0;
         m_Gamepads[joystickIndex].m_Position.Set(0, 0, 0);
         m_Gamepads[joystickIndex].m_Rotation.Set(0, 0, 0);
         m_Gamepads[joystickIndex].m_Sliders.Set(0, 0);
@@ -862,6 +914,7 @@ void SdlInputManager::ClearJoystickState(int joystickIndex)
         for (int i = 0; i < m_GamepadCount; i++)
         {
             m_Gamepads[i].m_Buttons = 0;
+            m_Gamepads[i].m_ButtonsHigh = 0;
             m_Gamepads[i].m_Position.Set(0, 0, 0);
             m_Gamepads[i].m_Rotation.Set(0, 0, 0);
             m_Gamepads[i].m_Sliders.Set(0, 0);
@@ -1179,7 +1232,7 @@ SdlInputManager::SdlInputManager(CKContext *context) : CKInputManager(context, "
 {
     m_Gamepads = NULL;
     m_GamepadCount = 0;
-    m_MaxGamepads = 4;
+    m_MaxGamepads = SDLINPUT_DEFAULT_MAX_JOYSTICKS;
     m_SdlInitialized = FALSE;
     m_KeyboardAttached = FALSE;
 
