@@ -122,10 +122,14 @@ void SdlInputManager::CKGamepad::Init(SDL_Gamepad *gamepad, SDL_JoystickID id)
     // Map triggers to Z axes (left trigger = Z, right trigger = Rz)
     m_HasZ = TRUE;
     m_HasRz = TRUE;
+    m_HasSlider0 = TRUE;
+    m_HasSlider1 = TRUE;
     
     // SDL triggers range from 0 to 32767
     m_Zmin = m_ZRmin = 0;
     m_Zmax = m_ZRmax = 32767;
+    m_Umin = m_Vmin = 0;
+    m_Umax = m_Vmax = 32767;
 }
 
 void SdlInputManager::CKGamepad::Release()
@@ -222,8 +226,15 @@ void SdlInputManager::CKGamepad::Poll()
 
     m_Rotation.Set(ClampAxis((float)(rx * gain)), ClampAxis((float)(ry * gain)), ClampAxis((float)(rz * gain)));
 
-    // Sliders are not typically available on standard gamepads
-    m_Sliders.Set(0.0f, 0.0f);
+    double slider0 = NormalizeAxis(leftTrigger, m_Umin, m_Umax);
+    double slider1 = NormalizeAxis(rightTrigger, m_Vmin, m_Vmax);
+
+    if (fabs(slider0) < deadzone)
+        slider0 = 0.0;
+    if (fabs(slider1) < deadzone)
+        slider1 = 0.0;
+
+    m_Sliders.Set(ClampAxis((float)(slider0 * gain)), ClampAxis((float)(slider1 * gain)));
 
     // D-pad to POV angle conversion
     // POV uses DirectInput format: degrees * 100, or -1 for centered
