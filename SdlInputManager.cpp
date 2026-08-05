@@ -55,6 +55,12 @@ static CKBOOL SdlInputGetButtonState(CKDWORD buttonsLow, CKDWORD buttonsHigh, in
     return ((buttonsHigh & mask) != 0) ? TRUE : FALSE;
 }
 
+static int SdlInputMouseButtonIndex(CK_MOUSEBUTTON button)
+{
+    const unsigned int index = static_cast<unsigned int>(button);
+    return index < 4u ? static_cast<int>(index) : -1;
+}
+
 #include "CKAll.h"
 
 #ifdef WIN32
@@ -302,17 +308,22 @@ int SdlInputManager::GetKeyFromBuffer(int i, CKDWORD &oKey, CKDWORD *oTimeStamp)
 
 CKBOOL SdlInputManager::IsMouseButtonDown(CK_MOUSEBUTTON iButton)
 {
-    return m_Mouse.m_State.rgbButtons[iButton] & KS_PRESSED;
+    const int index = SdlInputMouseButtonIndex(iButton);
+    return index >= 0 ? m_Mouse.m_State.rgbButtons[index] & KS_PRESSED : FALSE;
 }
 
 CKBOOL SdlInputManager::IsMouseClicked(CK_MOUSEBUTTON iButton)
 {
-    return (m_Mouse.m_State.rgbButtons[iButton] & KS_PRESSED) != 0 && (m_Mouse.m_LastButtons[iButton] & KS_PRESSED) == 0;
+    const int index = SdlInputMouseButtonIndex(iButton);
+    return index >= 0 &&
+           (m_Mouse.m_State.rgbButtons[index] & KS_PRESSED) != 0 &&
+           (m_Mouse.m_LastButtons[index] & KS_PRESSED) == 0;
 }
 
 CKBOOL SdlInputManager::IsMouseToggled(CK_MOUSEBUTTON iButton)
 {
-    return (m_Mouse.m_State.rgbButtons[iButton] >> 1) & KS_PRESSED;
+    const int index = SdlInputMouseButtonIndex(iButton);
+    return index >= 0 ? (m_Mouse.m_State.rgbButtons[index] >> 1) & KS_PRESSED : FALSE;
 }
 
 void SdlInputManager::GetMouseButtonsState(CKBYTE *oStates)
@@ -752,17 +763,19 @@ void SdlInputManager::SetMultipleKeys(const CKDWORD *keys, int count, CKBOOL pre
 
 void SdlInputManager::SetMouseButtonDown(CK_MOUSEBUTTON iButton)
 {
-    if (iButton < 4)
+    const int index = SdlInputMouseButtonIndex(iButton);
+    if (index >= 0)
     {
-        m_Mouse.m_State.rgbButtons[iButton] |= KS_PRESSED;
+        m_Mouse.m_State.rgbButtons[index] |= KS_PRESSED;
     }
 }
 
 void SdlInputManager::SetMouseButtonUp(CK_MOUSEBUTTON iButton)
 {
-    if (iButton < 4)
+    const int index = SdlInputMouseButtonIndex(iButton);
+    if (index >= 0)
     {
-        m_Mouse.m_State.rgbButtons[iButton] |= KS_RELEASED;
+        m_Mouse.m_State.rgbButtons[index] |= KS_RELEASED;
     }
 }
 
