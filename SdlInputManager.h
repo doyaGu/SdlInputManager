@@ -2,11 +2,11 @@
 #define SDLINPUTMANAGER_H
 
 #include "CKInputManager.h"
+#include "XArray.h"
 
 #include <SDL3/SDL.h>
 #include <atomic>
 #include <mutex>
-#include <vector>
 
 #ifdef LoadImage
 #undef LoadImage
@@ -280,7 +280,7 @@ public:
 protected:
     static bool SDLCALL ObserveEvent(void *userdata, SDL_Event *event);
     std::mutex m_EventMutex;
-    std::vector<SDL_Event> m_Events;
+    XArray<SDL_Event> m_Events;
     std::atomic<bool> m_EventCaptureFailed{false};
     bool m_ObservingEvents = false;
     SDL_InitFlags m_OwnedSubsystems = 0;

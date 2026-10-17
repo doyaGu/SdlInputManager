@@ -1031,7 +1031,7 @@ bool SDLCALL SdlInputManager::ObserveEvent(void *userdata, SDL_Event *event) {
         const SDL_WindowID source = keyboard ? event->key.windowID :
             (mouse ? event->motion.windowID : 0);
         if (manager->m_InputWindow && (keyboard || mouse) && source != manager->m_InputWindow) return true;
-        manager->m_Events.push_back(*event);
+        manager->m_Events.PushBack(*event);
     } catch (...) { manager->m_EventCaptureFailed = true; }
     return true;
 }
@@ -1054,17 +1054,18 @@ CKERROR SdlInputManager::PreProcess()
     // Snapshot previous button state before applying this frame's mouse events.
     m_Mouse.Poll(m_Paused);
 
-    std::vector<SDL_Event> pending;
+    XArray<SDL_Event> pending;
     {
         std::lock_guard<std::mutex> lock(m_EventMutex);
-        pending.swap(m_Events);
+        pending.Swap(m_Events);
     }
     if (m_EventCaptureFailed.exchange(false)) return CKERR_OUTOFMEMORY;
     // A scope and loop replace the old range/SDL queue loops: the application
     // keeps ownership of SDL's queue and receives every event independently.
     {
-        for (const SDL_Event &event : pending)
+        for (int i = 0; i < pending.Size(); ++i)
         {
+            const SDL_Event &event = pending[i];
             if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
                 ClearKeyboardState();
                 ClearMouseState();
@@ -1392,7 +1393,7 @@ void SdlInputManager::Uninitialize()
         SDL_RemoveEventWatch(&SdlInputManager::ObserveEvent, this);
         m_ObservingEvents = false;
     }
-    { std::lock_guard<std::mutex> lock(m_EventMutex); m_Events.clear(); }
+    { std::lock_guard<std::mutex> lock(m_EventMutex); m_Events.Clear(); }
     m_Mouse.Release();
 
     for (int i = 0; i < m_GamepadCount; i++)
@@ -1412,10 +1413,13 @@ void SdlInputManager::ClearBuffers()
     {
         std::lock_guard<std::mutex> lock(m_EventMutex);
         // Device removal still has to close its gamepad while input is paused.
-        for (auto it = m_Events.begin(); it != m_Events.end();) {
-            if (it->type == SDL_EVENT_GAMEPAD_ADDED || it->type == SDL_EVENT_GAMEPAD_REMOVED) ++it;
-            else it = m_Events.erase(it);
+        int kept = 0;
+        for (int i = 0; i < m_Events.Size(); ++i) {
+            const SDL_Event &event = m_Events[i];
+            if (event.type == SDL_EVENT_GAMEPAD_ADDED || event.type == SDL_EVENT_GAMEPAD_REMOVED)
+                m_Events[kept++] = event;
         }
+        m_Events.Resize(kept);
     }
     m_EventCaptureFailed = false;
 
