@@ -4,6 +4,9 @@
 #include "CKInputManager.h"
 
 #include <SDL3/SDL.h>
+#include <atomic>
+#include <mutex>
+#include <vector>
 
 #ifdef LoadImage
 #undef LoadImage
@@ -162,6 +165,7 @@ public:
     virtual void GetMouseButtonsState(CKBYTE oStates[4]);
     virtual void GetMousePosition(Vx2DVector &oPosition, CKBOOL iAbsolute = TRUE);
     virtual void GetMouseRelativePosition(VxVector &oPosition);
+    CKBOOL SetInputViewport(WIN_HANDLE Window, const VxRect &Rect, int Width, int Height) override;
 
     virtual CKBOOL IsMouseAttached();
 
@@ -274,6 +278,16 @@ public:
     static SDL_Scancode VirtoolsKeyToSdlScancode(CKDWORD key);
 
 protected:
+    static bool SDLCALL ObserveEvent(void *userdata, SDL_Event *event);
+    std::mutex m_EventMutex;
+    std::vector<SDL_Event> m_Events;
+    std::atomic<bool> m_EventCaptureFailed{false};
+    bool m_ObservingEvents = false;
+    SDL_InitFlags m_OwnedSubsystems = 0;
+    SDL_WindowID m_InputWindow = 0;
+    VxRect m_InputRect;
+    Vx2DVector m_InputPosition{0.0f, 0.0f};
+    Vx2DVector m_InputScale{1.0f, 1.0f};
     VXCURSOR_POINTER m_Cursor;
     CKMouse m_Mouse;
     CKGamepad *m_Gamepads;
@@ -283,7 +297,7 @@ protected:
     int m_KeyboardStamps[KEYBOARD_BUFFER_SIZE];
     KeyboardEvent m_KeyInBuffer[KEYBOARD_BUFFER_SIZE];
     int m_NumberOfKeyInBuffer;
-    CKBOOL m_Paused;
+    std::atomic<CKBOOL> m_Paused;
     CKBOOL m_WasPaused;
     CKBOOL m_EnableKeyboardRepetition;
     CKDWORD m_KeyboardRepeatDelay;

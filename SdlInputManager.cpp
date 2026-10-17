@@ -339,6 +339,11 @@ void SdlInputManager::GetMousePosition(Vx2DVector &oPosition, CKBOOL iAbsolute)
     }
     else
     {
+        if (m_InputWindow) {
+            oPosition.Set((m_InputPosition.x - m_InputRect.left) * m_InputScale.x,
+                          (m_InputPosition.y - m_InputRect.top) * m_InputScale.y);
+            return;
+        }
         CKRenderContext *rc = m_Context->GetPlayerRenderContext();
         if (rc)
         {
@@ -442,17 +447,41 @@ CKBOOL SdlInputManager::IsJoystickButtonDown(int iJoystick, int iButton)
     return SdlInputGetButtonState(gamepad->m_Buttons, gamepad->m_ButtonsHigh, iButton);
 }
 
+CKBOOL SdlInputManager::SetInputViewport(WIN_HANDLE window, const VxRect &rect, int width, int height)
+{
+    SDL_Window *source = static_cast<SDL_Window *>(window);
+    if (source && (!(rect.GetWidth() > 0) || !(rect.GetHeight() > 0) || width <= 0 || height <= 0))
+        return FALSE;
+    const SDL_WindowID id = source ? SDL_GetWindowID(source) : 0;
+    if (source && !id) return FALSE;
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(m_EventMutex);
+        changed = m_InputWindow != id;
+        m_InputWindow = id;
+        m_InputRect = rect;
+        m_InputScale.Set(source ? width / rect.GetWidth() : 1.0f,
+                         source ? height / rect.GetHeight() : 1.0f);
+    }
+    if (changed) ClearBuffers();
+    if (source && SDL_GetMouseFocus() == source)
+        SDL_GetMouseState(&m_InputPosition.x, &m_InputPosition.y);
+    return TRUE;
+}
+
 void SdlInputManager::Pause(CKBOOL pause)
 {
-    if (pause && !m_Paused)
+    bool newlyPaused = false;
     {
-        ClearBuffers();
+        // Serialize with the event watch so a queued press cannot survive Pause.
+        std::lock_guard<std::mutex> lock(m_EventMutex);
+        newlyPaused = pause && !m_Paused;
         m_Paused = pause;
-        m_WasPaused = TRUE;
-        return;
     }
-
-    m_Paused = pause;
+    if (newlyPaused) {
+        ClearBuffers();
+        m_WasPaused = TRUE;
+    }
 }
 
 int SdlInputManager::GetJoystickCount()
@@ -947,7 +976,7 @@ CKERROR SdlInputManager::OnCKInit()
 {
     if (!m_SdlInitialized)
         Initialize();
-    return CK_OK;
+    return m_SdlInitialized && m_ObservingEvents ? CK_OK : CKERR_INVALIDOPERATION;
 }
 
 CKERROR SdlInputManager::OnCKEnd()
@@ -979,12 +1008,32 @@ CKERROR SdlInputManager::OnCKPlay()
 
     // Pump SDL events to clear any queued input
     SDL_PumpEvents();
-    SDL_FlushEvents(SDL_EVENT_KEY_DOWN, SDL_EVENT_KEY_UP);
+    ClearBuffers();
 
     if (!m_ShowCursor)
         EnsureCursorVisible(FALSE);
 
     return CK_OK;
+}
+
+bool SDLCALL SdlInputManager::ObserveEvent(void *userdata, SDL_Event *event) {
+    SdlInputManager *manager = static_cast<SdlInputManager *>(userdata);
+    const bool keyboard = event->type == SDL_EVENT_KEY_DOWN || event->type == SDL_EVENT_KEY_UP;
+    const bool mouse = event->type >= SDL_EVENT_MOUSE_MOTION && event->type <= SDL_EVENT_MOUSE_WHEEL;
+    const bool gamepad = event->type >= SDL_EVENT_GAMEPAD_AXIS_MOTION && event->type <= SDL_EVENT_GAMEPAD_STEAM_HANDLE_UPDATED;
+    const bool focusLost = event->type == SDL_EVENT_WINDOW_FOCUS_LOST;
+    if (!keyboard && !mouse && !gamepad && !focusLost) return true;
+    try {
+        std::lock_guard<std::mutex> lock(manager->m_EventMutex);
+        if (focusLost && event->window.windowID != manager->m_InputWindow) return true;
+
+        if (manager->m_Paused && event->type != SDL_EVENT_GAMEPAD_ADDED && event->type != SDL_EVENT_GAMEPAD_REMOVED) return true;
+        const SDL_WindowID source = keyboard ? event->key.windowID :
+            (mouse ? event->motion.windowID : 0);
+        if (manager->m_InputWindow && (keyboard || mouse) && source != manager->m_InputWindow) return true;
+        manager->m_Events.push_back(*event);
+    } catch (...) { manager->m_EventCaptureFailed = true; }
+    return true;
 }
 
 CKERROR SdlInputManager::PreProcess()
@@ -1000,23 +1049,33 @@ CKERROR SdlInputManager::PreProcess()
     // Process only input events here. Window/quit/display events belong to the
     // player window loop and draining the full SDL queue can keep CK processing
     // from returning on some platforms.
-    SDL_Event event;
     m_NumberOfKeyInBuffer = 0;
 
     // Snapshot previous button state before applying this frame's mouse events.
     m_Mouse.Poll(m_Paused);
 
-    const Uint32 eventRanges[][2] = {
-        { SDL_EVENT_KEY_DOWN, SDL_EVENT_SCREEN_KEYBOARD_HIDDEN },
-        { SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_REMOVED },
-        { SDL_EVENT_GAMEPAD_AXIS_MOTION, SDL_EVENT_GAMEPAD_STEAM_HANDLE_UPDATED },
-    };
-
-    for (int rangeIndex = 0; rangeIndex < (int)(sizeof(eventRanges) / sizeof(eventRanges[0])); ++rangeIndex)
+    std::vector<SDL_Event> pending;
     {
-        while (SDL_PeepEvents(&event, 1, SDL_GETEVENT, eventRanges[rangeIndex][0], eventRanges[rangeIndex][1]) > 0)
+        std::lock_guard<std::mutex> lock(m_EventMutex);
+        pending.swap(m_Events);
+    }
+    if (m_EventCaptureFailed.exchange(false)) return CKERR_OUTOFMEMORY;
+    // A scope and loop replace the old range/SDL queue loops: the application
+    // keeps ownership of SDL's queue and receives every event independently.
+    {
+        for (const SDL_Event &event : pending)
         {
-            if (!m_Paused)
+            if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+                ClearKeyboardState();
+                ClearMouseState();
+                continue;
+            }
+            const bool hotplug = event.type == SDL_EVENT_GAMEPAD_ADDED || event.type == SDL_EVENT_GAMEPAD_REMOVED;
+            if (event.type == SDL_EVENT_MOUSE_MOTION && m_InputWindow)
+                m_InputPosition.Set(event.motion.x, event.motion.y);
+            if ((event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP) && m_InputWindow)
+                m_InputPosition.Set(event.button.x, event.button.y);
+            if (!m_Paused || hotplug)
             {
                 switch (event.type)
                 {
@@ -1066,6 +1125,9 @@ CKERROR SdlInputManager::PreProcess()
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
                 case SDL_EVENT_MOUSE_BUTTON_UP:
                 {
+                    if (m_InputWindow && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+                        (event.button.x < m_InputRect.left || event.button.x >= m_InputRect.right ||
+                         event.button.y < m_InputRect.top || event.button.y >= m_InputRect.bottom)) break;
                     int button = -1;
                     switch (event.button.button)
                     {
@@ -1203,8 +1265,8 @@ CKERROR SdlInputManager::PreProcess()
     }
 
     // Update relative mouse motion
-    m_Mouse.m_State.lX = (long)m_RelMouseX;
-    m_Mouse.m_State.lY = (long)m_RelMouseY;
+    m_Mouse.m_State.lX = (long)(m_RelMouseX * m_InputScale.x);
+    m_Mouse.m_State.lY = (long)(m_RelMouseY * m_InputScale.y);
     m_Mouse.m_State.lZ = (long)m_RelMouseWheel;
 
     for (int i = 0; i < m_GamepadCount; i++)
@@ -1293,25 +1355,15 @@ void SdlInputManager::Initialize()
         }
     }
 
-    // Initialize SDL subsystems if not already done
-    if (!SDL_WasInit(SDL_INIT_GAMEPAD))
-    {
-        if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD))
-        {
-            // Log error but continue - keyboard/mouse may still work
-        }
-    }
-
-    if (!SDL_WasInit(SDL_INIT_EVENTS))
-    {
-        if (!SDL_InitSubSystem(SDL_INIT_EVENTS))
-        {
-            // Log error
-        }
-    }
-
-    m_SdlInitialized = TRUE;
-    m_KeyboardAttached = TRUE; // SDL always has keyboard access
+    // Own one reference even when another SDL consumer initialized it first.
+    if (!(m_OwnedSubsystems & SDL_INIT_EVENTS) && SDL_InitSubSystem(SDL_INIT_EVENTS))
+        m_OwnedSubsystems |= SDL_INIT_EVENTS;
+    if (!(m_OwnedSubsystems & SDL_INIT_GAMEPAD) && SDL_InitSubSystem(SDL_INIT_GAMEPAD))
+        m_OwnedSubsystems |= SDL_INIT_GAMEPAD;
+    m_SdlInitialized = (m_OwnedSubsystems & SDL_INIT_EVENTS) != 0;
+    if (m_SdlInitialized && !m_ObservingEvents)
+        m_ObservingEvents = SDL_AddEventWatch(&SdlInputManager::ObserveEvent, this);
+    m_KeyboardAttached = m_ObservingEvents;
 
     // Initialize mouse
     m_Mouse.Init();
@@ -1336,23 +1388,36 @@ void SdlInputManager::Initialize()
 
 void SdlInputManager::Uninitialize()
 {
+    if (m_ObservingEvents) {
+        SDL_RemoveEventWatch(&SdlInputManager::ObserveEvent, this);
+        m_ObservingEvents = false;
+    }
+    { std::lock_guard<std::mutex> lock(m_EventMutex); m_Events.clear(); }
     m_Mouse.Release();
 
     for (int i = 0; i < m_GamepadCount; i++)
         m_Gamepads[i].Release();
 
     m_GamepadCount = 0;
+    m_InputWindow = 0;
+    if (m_OwnedSubsystems) SDL_QuitSubSystem(m_OwnedSubsystems);
+    m_OwnedSubsystems = 0;
     m_SdlInitialized = FALSE;
     m_KeyboardAttached = FALSE;
 }
 
 void SdlInputManager::ClearBuffers()
 {
-    // Pump and discard all pending events
-    SDL_PumpEvents();
-    SDL_FlushEvents(SDL_EVENT_KEY_DOWN, SDL_EVENT_KEY_UP);
-    SDL_FlushEvents(SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_EVENT_MOUSE_WHEEL);
-    SDL_FlushEvents(SDL_EVENT_GAMEPAD_AXIS_MOTION, SDL_EVENT_GAMEPAD_BUTTON_UP);
+    // Discard only this manager's pending input. Do not flush application events.
+    {
+        std::lock_guard<std::mutex> lock(m_EventMutex);
+        // Device removal still has to close its gamepad while input is paused.
+        for (auto it = m_Events.begin(); it != m_Events.end();) {
+            if (it->type == SDL_EVENT_GAMEPAD_ADDED || it->type == SDL_EVENT_GAMEPAD_REMOVED) ++it;
+            else it = m_Events.erase(it);
+        }
+    }
+    m_EventCaptureFailed = false;
 
     m_Mouse.Clear();
     memset(m_KeyboardState, 0, sizeof(m_KeyboardState));
