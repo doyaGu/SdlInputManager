@@ -328,7 +328,7 @@ CKBOOL SdlInputManager::IsMouseToggled(CK_MOUSEBUTTON iButton)
 
 void SdlInputManager::GetMouseButtonsState(CKBYTE *oStates)
 {
-    *(CKDWORD *)oStates = *(CKDWORD *)(m_Mouse.m_State.rgbButtons);
+    memcpy(oStates, m_Mouse.m_State.rgbButtons, 4);
 }
 
 void SdlInputManager::GetMousePosition(Vx2DVector &oPosition, CKBOOL iAbsolute)
