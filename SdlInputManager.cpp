@@ -298,8 +298,8 @@ int SdlInputManager::GetNumberOfKeyInBuffer()
 
 int SdlInputManager::GetKeyFromBuffer(int i, CKDWORD &oKey, CKDWORD *oTimeStamp)
 {
-    if (i >= m_NumberOfKeyInBuffer)
-        return 0;
+    if (i < 0 || i >= m_NumberOfKeyInBuffer)
+        return NO_KEY;
     oKey = m_KeyInBuffer[i].dwOfs;
     if (oTimeStamp)
         *oTimeStamp = m_KeyInBuffer[i].dwTimeStamp;
