@@ -375,6 +375,8 @@ CKBOOL SdlInputManager::IsJoystickAttached(int iJoystick)
 
 void SdlInputManager::GetJoystickPosition(int iJoystick, VxVector *oPosition)
 {
+    if (m_Paused)
+        return;
     if (iJoystick < 0 || iJoystick >= m_GamepadCount)
         return;
 
@@ -388,6 +390,8 @@ void SdlInputManager::GetJoystickPosition(int iJoystick, VxVector *oPosition)
 
 void SdlInputManager::GetJoystickRotation(int iJoystick, VxVector *oRotation)
 {
+    if (m_Paused)
+        return;
     if (iJoystick < 0 || iJoystick >= m_GamepadCount)
         return;
 
@@ -401,6 +405,8 @@ void SdlInputManager::GetJoystickRotation(int iJoystick, VxVector *oRotation)
 
 void SdlInputManager::GetJoystickSliders(int iJoystick, Vx2DVector *oPosition)
 {
+    if (m_Paused)
+        return;
     if (iJoystick < 0 || iJoystick >= m_GamepadCount)
         return;
 
@@ -414,6 +420,8 @@ void SdlInputManager::GetJoystickSliders(int iJoystick, Vx2DVector *oPosition)
 
 void SdlInputManager::GetJoystickPointOfViewAngle(int iJoystick, float *oAngle)
 {
+    if (m_Paused)
+        return;
     if (iJoystick < 0 || iJoystick >= m_GamepadCount)
         return;
 
@@ -429,6 +437,8 @@ void SdlInputManager::GetJoystickPointOfViewAngle(int iJoystick, float *oAngle)
 
 CKDWORD SdlInputManager::GetJoystickButtonsState(int iJoystick)
 {
+    if (m_Paused)
+        return 0;
     if (iJoystick < 0 || iJoystick >= m_GamepadCount)
         return 0;
 
@@ -439,6 +449,8 @@ CKDWORD SdlInputManager::GetJoystickButtonsState(int iJoystick)
 
 CKBOOL SdlInputManager::IsJoystickButtonDown(int iJoystick, int iButton)
 {
+    if (m_Paused)
+        return FALSE;
     if (iJoystick < 0 || iJoystick >= m_GamepadCount)
         return FALSE;
 
