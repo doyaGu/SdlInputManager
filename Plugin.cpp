@@ -55,7 +55,7 @@ CKERROR RemoveManager(CKContext *context)
 
 PLUGIN_EXPORT CKPluginInfo *CKGetPluginInfo(int Index)
 {
-    g_PluginInfo.m_Author = "Ballanced";
+    g_PluginInfo.m_Author = "NeMo2";
     g_PluginInfo.m_Description = "SDL3 Keyboard/Mouse/Gamepad Manager";
     g_PluginInfo.m_Extension = "";
     g_PluginInfo.m_Type = CKPLUGIN_MANAGER_DLL;
