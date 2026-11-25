@@ -1006,6 +1006,9 @@ CKERROR SdlInputManager::OnCKReset()
 
 CKERROR SdlInputManager::OnCKPause()
 {
+    // The focus-loss event can be queued while the host pauses CK before
+    // the next PreProcess. Release the held input as part of pausing.
+    ClearBuffers();
     if (!m_ShowCursor)
         EnsureCursorVisible(TRUE);
     return CK_OK;
